@@ -82,6 +82,7 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *Motor2 = AFMS.getMotor(2);
 Adafruit_DCMotor *Motor4 = AFMS.getMotor(4);
 
+int speed = 80;
 int leftSpeed = 0, rightSpeed = 0;
 
 float previous_pos; // previous position
@@ -171,7 +172,7 @@ float real_position(float pseudoposition)
 }
 
 // get PID controller output given error and speed, using the PID constants from the LUT
-void pid_step(float error, int speed, int *leftSpeed, int *rightSpeed)
+void pid_step(float error, int *speed, int *leftSpeed, int *rightSpeed)
 {
 	float output = 0;
 	pid_t terms = speedLUT[1];
@@ -189,16 +190,19 @@ void pid_step(float error, int speed, int *leftSpeed, int *rightSpeed)
 		err_acc = -terms.r;
 	}
 
+	*speed += 0.01;
+	*speed -= terms.d * (error - previous_pos);
+
 	if (output > 0)
 	{
-		*leftSpeed = speed;
-		*rightSpeed = speed - (int)output;
+		*leftSpeed = *speed;
+		*rightSpeed = *speed - (int)output;
 		*rightSpeed = *rightSpeed < -255 ? -255 : *rightSpeed;
 	}
 	else
 	{
-		*leftSpeed = speed + (int)output;
-		*rightSpeed = speed;
+		*leftSpeed = *speed + (int)output;
+		*rightSpeed = *speed;
 		*leftSpeed = *leftSpeed < -255 ? -255 : *leftSpeed;
 	}
 
@@ -232,7 +236,7 @@ void setup()
 // standard Arduino loop function
 void loop()
 {
-	pid_step(real_position(pseudoposition_calc().position), 40, &leftSpeed, &rightSpeed);
+	pid_step(real_position(pseudoposition_calc().position), &speed, &leftSpeed, &rightSpeed);
 	if (leftSpeed > 0)
 	{
 		Motor2->setSpeed(leftSpeed);
