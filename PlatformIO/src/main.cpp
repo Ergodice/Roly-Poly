@@ -17,6 +17,7 @@ typedef struct
 	float i;
 	float d;
 	float r;
+	float s;
 } pid_t;
 
 // maps observed position to real position
@@ -42,31 +43,34 @@ CRGB leds[5];
 
 // a LUT mapping current speed to predetermined corresponding PID constants
 const pid_t speedLUT[] = {
-	(pid_t){1, 2, 3}, // Speed 0
 	(pid_t){
-		// Speed 1 (40)
+		// Speed 0 (40)
 		25,
 		0.05,
 		2,
 		8,
-	},
+		40},
 	(pid_t){
-		// Speed 2 (80)
+		// Speed 1 (80)
 		20,
 		0.1,
 		90,
-		50,
-	},
+		16,
+		80},
 	(pid_t){
-		// Speed 3 (120)
-		65,
-		0.1,
-		50,
-		50,
-	},
-	(pid_t){1, 2, 3}, // Speed 4
-	(pid_t){1, 2, 3}, // Speed 4 (Duplicated)
-};
+		// Speed 2 (120)
+		35,
+		0.2,
+		120,
+		35,
+		120},
+	(pid_t){
+		// Speed 2 (120)
+		35,
+		0.2,
+		120,
+		35,
+		120}};
 
 // unused
 const map_t photomapLUT[] = {
@@ -82,7 +86,7 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *Motor2 = AFMS.getMotor(2);
 Adafruit_DCMotor *Motor4 = AFMS.getMotor(4);
 
-int speed = 80;
+float speed = 0.5;
 int leftSpeed = 0, rightSpeed = 0;
 
 float previous_pos; // previous position
@@ -99,13 +103,15 @@ pid_t pid_lerp(float n)
 	float frac = n - whole;
 	float frac_inv = 1.0 - frac;
 
-	pid_t sl = speedLUT[whole + 1];
-	pid_t sh = speedLUT[whole + 2];
+	pid_t sl = speedLUT[whole];
+	pid_t sh = speedLUT[whole + 1];
 
 	return (pid_t){
 		sh.p * frac + sl.p * frac_inv,
 		sh.i * frac + sl.i * frac_inv,
-		sh.d * frac + sl.d * frac_inv};
+		sh.d * frac + sl.d * frac_inv,
+		sh.r * frac + sl.r * frac_inv,
+		sh.s * frac + sl.s * frac_inv};
 }
 
 // calculates a pseudoposition from photoresistor readings
@@ -172,10 +178,10 @@ float real_position(float pseudoposition)
 }
 
 // get PID controller output given error and speed, using the PID constants from the LUT
-void pid_step(float error, int *speed, int *leftSpeed, int *rightSpeed)
+void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 {
 	float output = 0;
-	pid_t terms = speedLUT[1];
+	pid_t terms = pid_lerp(*speed);
 	output += terms.p * error;
 	output += terms.i * err_acc;
 	output += terms.d * (error - previous_pos);
@@ -190,19 +196,26 @@ void pid_step(float error, int *speed, int *leftSpeed, int *rightSpeed)
 		err_acc = -terms.r;
 	}
 
-	*speed += 0.01;
-	*speed -= terms.d * (error - previous_pos);
+	*speed += 0.02;
+	*speed -= abs(0.5 * terms.d * (error - previous_pos)) * 3.0 / 255.0;
+	if (*speed > 1.7)
+		*speed = 1.7;
+	if (*speed < 0)
+		*speed = 0;
+	
+	// OVERRIDE!
+	// *speed = 2;
 
 	if (output > 0)
 	{
-		*leftSpeed = *speed;
-		*rightSpeed = *speed - (int)output;
+		*leftSpeed = terms.s;
+		*rightSpeed = terms.s - (int)output;
 		*rightSpeed = *rightSpeed < -255 ? -255 : *rightSpeed;
 	}
 	else
 	{
-		*leftSpeed = *speed + (int)output;
-		*rightSpeed = *speed;
+		*leftSpeed = terms.s + (int)output;
+		*rightSpeed = terms.s;
 		*leftSpeed = *leftSpeed < -255 ? -255 : *leftSpeed;
 	}
 
