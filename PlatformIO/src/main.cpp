@@ -42,17 +42,35 @@ CRGB leds[5];
 
 // a LUT mapping current speed to predetermined corresponding PID constants
 const pid_t speedLUT[] = {
-		(pid_t){1, 2, 3}, // Speed 0
-		(pid_t){1, 2, 3}, // Speed 1
-		(pid_t){1, 2, 3}, // Speed 2
-		(pid_t){1, 2, 3}, // Speed 3
-		(pid_t){1, 2, 3}, // Speed 4
-		(pid_t){1, 2, 3}, // Speed 4 (Duplicated)
+	(pid_t){1, 2, 3}, // Speed 0
+	(pid_t){
+		// Speed 1 (40)
+		25,
+		0.05,
+		2,
+		8,
+	},
+	(pid_t){
+		// Speed 2 (80)
+		20,
+		0.1,
+		90,
+		50,
+	},
+	(pid_t){
+		// Speed 3 (120)
+		65,
+		0.1,
+		50,
+		50,
+	},
+	(pid_t){1, 2, 3}, // Speed 4
+	(pid_t){1, 2, 3}, // Speed 4 (Duplicated)
 };
 
 // unused
 const map_t photomapLUT[] = {
-		(map_t){}};
+	(map_t){}};
 
 const int photo_pins_unmapped[] = {A8, A9, A10, A11, A12, A13, A14};
 const int photo_pins[] = {A9, A13, A11, A10, A8, A14, A12};
@@ -64,18 +82,10 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *Motor2 = AFMS.getMotor(2);
 Adafruit_DCMotor *Motor4 = AFMS.getMotor(4);
 
-// PID controller terms
-pid_t terms = {
-		20,
-		0.1,
-		90,
-		50,
-};
-
 int leftSpeed = 0, rightSpeed = 0;
 
-float previous_pos;  // previous position
-float err_acc;       // accumulated error
+float previous_pos; // previous position
+float err_acc;		// accumulated error
 
 /*
 FUNCTION DEFINTIONS
@@ -92,9 +102,9 @@ pid_t pid_lerp(float n)
 	pid_t sh = speedLUT[whole + 2];
 
 	return (pid_t){
-			sh.p * frac + sl.p * frac_inv,
-			sh.i * frac + sl.i * frac_inv,
-			sh.d * frac + sl.d * frac_inv};
+		sh.p * frac + sl.p * frac_inv,
+		sh.i * frac + sl.i * frac_inv,
+		sh.d * frac + sl.d * frac_inv};
 }
 
 // calculates a pseudoposition from photoresistor readings
@@ -132,12 +142,10 @@ pseudoposition_t pseudoposition_calc()
 
   float deviation = sqrtf(summation / 7);
   */
-	return (pseudoposition_t)
-	{
+	return (pseudoposition_t){
 		.position = position_raw,
 		//.spread = deviation
-		.spread = 0
-	};
+		.spread = 0};
 }
 
 // converts a pseudoposition to a real position using a polynomial approximation of the mapping from pseudoposition to real position
@@ -166,6 +174,7 @@ float real_position(float pseudoposition)
 void pid_step(float error, int speed, int *leftSpeed, int *rightSpeed)
 {
 	float output = 0;
+	pid_t terms = speedLUT[1];
 	output += terms.p * error;
 	output += terms.i * err_acc;
 	output += terms.d * (error - previous_pos);
@@ -215,15 +224,15 @@ void setup()
 	}
 
 	Motor2->setSpeed(0);
-  	Motor2->run(FORWARD);
+	Motor2->run(FORWARD);
 	Motor4->setSpeed(0);
-  	Motor4->run(FORWARD);
+	Motor4->run(FORWARD);
 }
 
 // standard Arduino loop function
 void loop()
 {
-	pid_step(real_position(pseudoposition_calc().position), 80, &leftSpeed, &rightSpeed);
+	pid_step(real_position(pseudoposition_calc().position), 40, &leftSpeed, &rightSpeed);
 	if (leftSpeed > 0)
 	{
 		Motor2->setSpeed(leftSpeed);
@@ -234,7 +243,7 @@ void loop()
 		Motor2->setSpeed(-leftSpeed);
 		Motor2->run(BACKWARD);
 	}
-	
+
 	if (rightSpeed > 0)
 	{
 		Motor4->setSpeed(rightSpeed);
