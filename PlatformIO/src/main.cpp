@@ -16,6 +16,7 @@ typedef struct
 	float p;
 	float i;
 	float d;
+	float r;
 } pid_t;
 
 // maps observed position to real position
@@ -61,17 +62,20 @@ const float photo_LUT[] = {0.58, 0.58, 0.74, 0.73, 0.35, -0.03, -0.11, 0.11, 0.1
 // motor shield setup
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *Motor2 = AFMS.getMotor(2);
-Adafruit_DCMotor *Motor3 = AFMS.getMotor(3);
+Adafruit_DCMotor *Motor4 = AFMS.getMotor(4);
 
 // PID controller terms
 pid_t terms = {
-		1,
-		0,
-		0,
+		20,
+		0.1,
+		90,
+		50,
 };
 
-float previous_pos; // previous position
-float err_acc;      // accumulated error
+int leftSpeed = 0, rightSpeed = 0;
+
+float previous_pos;  // previous position
+float err_acc;       // accumulated error
 
 /*
 FUNCTION DEFINTIONS
@@ -159,7 +163,7 @@ float real_position(float pseudoposition)
 }
 
 // get PID controller output given error and speed, using the PID constants from the LUT
-void pid_step(float error, float speed)
+void pid_step(float error, int speed, int *leftSpeed, int *rightSpeed)
 {
 	float output = 0;
 	output += terms.p * error;
@@ -167,12 +171,29 @@ void pid_step(float error, float speed)
 	output += terms.d * (error - previous_pos);
 	err_acc += error;
 
-	float speedL = speed * output;
-	float speedR = speed * -output;
+	if (err_acc > terms.r)
+	{
+		err_acc = terms.r;
+	}
+	else if (err_acc < -terms.r)
+	{
+		err_acc = -terms.r;
+	}
 
-	Motor2->setSpeed((int)speedL * 255);
-  Motor3->setSpeed((int)speedR * 255);
+	if (output > 0)
+	{
+		*leftSpeed = speed;
+		*rightSpeed = speed - (int)output;
+		*rightSpeed = *rightSpeed < -255 ? -255 : *rightSpeed;
+	}
+	else
+	{
+		*leftSpeed = speed + (int)output;
+		*rightSpeed = speed;
+		*leftSpeed = *leftSpeed < -255 ? -255 : *leftSpeed;
+	}
 
+	previous_pos = error;
 }
 
 // standard Arduino setup function
@@ -193,14 +214,35 @@ void setup()
 		FastLED.show();
 	}
 
-  Motor2->run(FORWARD);
-  Motor3->run(FORWARD);
-
+	Motor2->setSpeed(0);
+  	Motor2->run(FORWARD);
+	Motor4->setSpeed(0);
+  	Motor4->run(FORWARD);
 }
 
 // standard Arduino loop function
 void loop()
 {
-	pid_step(real_position(pseudoposition_calc().position), 0.1);
-	delay(1);
+	pid_step(real_position(pseudoposition_calc().position), 80, &leftSpeed, &rightSpeed);
+	if (leftSpeed > 0)
+	{
+		Motor2->setSpeed(leftSpeed);
+		Motor2->run(FORWARD);
+	}
+	else
+	{
+		Motor2->setSpeed(-leftSpeed);
+		Motor2->run(BACKWARD);
+	}
+	
+	if (rightSpeed > 0)
+	{
+		Motor4->setSpeed(rightSpeed);
+		Motor4->run(FORWARD);
+	}
+	else
+	{
+		Motor4->setSpeed(-rightSpeed);
+		Motor4->run(BACKWARD);
+	}
 }
