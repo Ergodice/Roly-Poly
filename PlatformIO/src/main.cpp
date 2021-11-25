@@ -59,18 +59,25 @@ const pid_t speedLUT[] = {
 		80},
 	(pid_t){
 		// Speed 2 (120)
-		35,
-		0.2,
-		120,
-		35,
+		45,
+		0.075,
+		150,
+		40,
 		120},
 	(pid_t){
-		// Speed 2 (120)
-		35,
-		0.2,
-		120,
-		35,
-		120}};
+		// Speed 3 (250)
+		50,
+		0.1,
+		275,
+		30,
+		255},
+	(pid_t){
+		// Speed 3 (250)
+		50,
+		0.1,
+		275,
+		30,
+		255}};
 
 // unused
 const map_t photomapLUT[] = {
@@ -197,14 +204,14 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 	}
 
 	*speed += 0.02;
-	*speed -= abs(0.5 * terms.d * (error - previous_pos)) * 3.0 / 255.0;
-	if (*speed > 1.7)
-		*speed = 1.7;
+	*speed -= abs(0.2 * terms.d * (error - previous_pos)) * 3.0 / 255.0;
+	if (*speed > 2)
+		*speed = 2;
 	if (*speed < 0)
 		*speed = 0;
 	
 	// OVERRIDE!
-	// *speed = 2;
+	// *speed = 3;
 
 	if (output > 0)
 	{
