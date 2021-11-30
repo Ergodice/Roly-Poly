@@ -99,11 +99,7 @@ Thank you from the Roly Poly team!
 
 */
 
-
-
 // CODE BEGIN
-
-
 
 /*
 TYPEDEFS
@@ -132,6 +128,14 @@ typedef struct
 	float position;
 	float spread;
 } pseudoposition_t;
+
+typedef enum
+{
+	ST_NOMINAL,
+	ST_ALL_WHITE,
+	ST_TWO_LINE,
+	ST_ALL_BLACK
+} line_state_t;
 
 /*
 VARIABLE INITIALIZATIONS
@@ -198,6 +202,9 @@ int leftSpeed = 0, rightSpeed = 0;
 float previous_pos; // previous position
 float err_acc;		// accumulated error
 
+line_state_t state;
+line_state_t state_prev;
+
 /*
 FUNCTION DEFINTIONS
 */
@@ -220,21 +227,76 @@ pid_t pid_lerp(float n)
 		sh.s * frac + sl.s * frac_inv};
 }
 
+int extreme_position_lock = 0;
+int all_white_lock = 0;
+int all_black_lock = 0;
+const int lock_reset = 200;
+bool bad_state = false;
+bool bad_state_prev = false;
+
+line_state_t find_state(int sum)
+{
+	if (sum < 2600)
+		return ST_ALL_WHITE;
+	if (sum < 3000)
+		return ST_NOMINAL;
+	else
+		return ST_ALL_BLACK;
+}
+
+char *state_str(line_state_t state)
+{
+	switch (state)
+	{
+	case ST_NOMINAL:
+		return "1 Line (Nominal)";
+	case ST_ALL_BLACK:
+		return "All Black";
+	case ST_ALL_WHITE:
+		return "All White";
+	case ST_TWO_LINE:
+		return "2 lines";
+	default:
+		return "Bruh";
+	}
+}
+
 // calculates a pseudoposition from photoresistor readings. This is raw and uncalibrated, thus unusable without real_position().
 pseudoposition_t pseudoposition_calc()
 {
 	float position_raw = 0.0;
 	float weights[7];
-	float max;
+	int sum = 0;
 
 	for (int i = 0; i < 7; i++)
 	{
 		float readout = 1024.0 - ((float)analogRead(photo_pins[i]));
+		//Serial.print(readout);
+		//Serial.print(" \t");
 		float node = (float)(i - 3);
 		float weight = node * readout;
 		position_raw += weight;
 		weights[i] = weight;
+		sum += readout;
 	}
+	//Serial.println();
+
+	//Serial.println(sum);
+
+	state = find_state(sum);
+	if (state != state_prev)
+	{
+		//Serial.print("Change state: ");
+		//Serial.println(state_str(state));
+	}
+	state_prev = state;
+
+	/*
+	if (sum > 2800 && sum < 3200)
+		Serial.println("On Track");
+	else
+		Serial.println("Off Track");
+		*/
 
 	/*
   int whole = (int)position_raw + 3;
@@ -269,11 +331,21 @@ float real_position(float pseudoposition)
 	// [0.011193,15.,9167.,2.0907e6]
 	float x = pseudoposition;
 
+/*
 	const float scale = 1000000;
 	const float c1 = 0.011193;
 	const float c2 = 15;
 	const float c3 = 9167;
 	const float c4 = 2.0907;
+	*/
+
+	//5.9987026497829e−9*a^(3)+1.4775180062956−5*a^(2)+0.014612004640109*a+4.9018603996764
+	const float scale = 1000000;
+	const float c1 = 0.005999;
+	const float c2 = 14.7752;
+	const float c3 = 14612.0;
+	const float c4 = 4.90186;
+
 
 	float t1 = c1 * (x * x * x);
 	float t2 = c2 * (x * x);
@@ -284,9 +356,21 @@ float real_position(float pseudoposition)
 	return poly / scale + c4;
 }
 
+float leftSpeedValid, rightSpeedValid;
+line_state_t prev_state;
+
 // get PID controller output given error and speed, using the PID constants from the LUT
 void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 {
+	//Serial.println(error);
+
+	if (fabs(error) > 3.0)
+	{
+		*speed = 0;
+		error = abs(error) / error * 3.0;
+	}
+
+
 	float output = 0;
 	pid_t terms = pid_lerp(*speed);
 	output += terms.p * error;
@@ -309,7 +393,7 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 		*speed = 2;
 	if (*speed < 0)
 		*speed = 0;
-	
+
 	// OVERRIDE!
 	// *speed = 3;
 
@@ -325,6 +409,37 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 		*rightSpeed = terms.s;
 		*leftSpeed = *leftSpeed < -255 ? -255 : *leftSpeed;
 	}
+
+	if(state != prev_state) 
+	
+	if (state == ST_NOMINAL)
+	{
+		prev_state = ST_NOMINAL;
+		leftSpeedValid = *leftSpeed;
+		rightSpeedValid = *rightSpeed;
+	}
+	else if (state == ST_ALL_BLACK)
+	{
+		prev_state = ST_ALL_BLACK;
+		*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 30;
+		*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 30;
+		*speed = 0;
+	}
+	else if (state == ST_ALL_WHITE)
+	{
+		
+		if(prev_state == ST_NOMINAL) {
+			*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 40 - 80;
+			*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 40 - 80;
+		} else {
+			*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 40 - 80;
+			*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 40 - 80;
+		}
+		*speed = 0;
+	}
+	
+
+	//Serial.println(state_str(state));
 
 	previous_pos = error;
 }
@@ -378,4 +493,34 @@ void loop()
 		Motor4->setSpeed(-rightSpeed);
 		Motor4->run(BACKWARD);
 	}
+
+	// if (!extreme_position_lock && !all_white_lock && !all_black_lock)
+	// 	bad_state = false;
+
+	// if (all_white_lock)
+	// {
+	// 	all_white_lock--;
+	// 	//if (!all_white_lock)
+	// 	//	Serial.println("All White Unlocked.");
+	// }
+
+	// if (all_black_lock)
+	// {
+	// 	all_black_lock--;
+	// 	//if (!all_black_lock)
+	// 	//	Serial.println("All White Unlocked.");
+	// }
+	// if (extreme_position_lock)
+	// {
+	// 	extreme_position_lock--;
+	// 	//if (!extreme_position_lock)
+	// 	//	Serial.println("Extreme Position Unlocked.");
+	// }
+
+	// if (bad_state != bad_state_prev)
+	// {
+	// 	//Serial.print("Bad state? ");
+	// 	//Serial.println(bad_state);
+	// }
+	// bad_state_prev = bad_state;
 }
