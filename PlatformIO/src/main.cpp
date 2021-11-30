@@ -236,9 +236,9 @@ bool bad_state_prev = false;
 
 line_state_t find_state(int sum)
 {
-	if (sum < 2600)
+	if (sum < 2100)
 		return ST_ALL_WHITE;
-	if (sum < 3000)
+	if (sum < 2700)
 		return ST_NOMINAL;
 	else
 		return ST_ALL_BLACK;
@@ -282,6 +282,7 @@ pseudoposition_t pseudoposition_calc()
 	//Serial.println();
 
 	//Serial.println(sum);
+	//Serial.println(position_raw);
 
 	state = find_state(sum);
 	if (state != state_prev)
@@ -331,7 +332,7 @@ float real_position(float pseudoposition)
 	// [0.011193,15.,9167.,2.0907e6]
 	float x = pseudoposition;
 
-/*
+	/*
 	const float scale = 1000000;
 	const float c1 = 0.011193;
 	const float c2 = 15;
@@ -339,13 +340,12 @@ float real_position(float pseudoposition)
 	const float c4 = 2.0907;
 	*/
 
-	//5.9987026497829e−9*a^(3)+1.4775180062956−5*a^(2)+0.014612004640109*a+4.9018603996764
+	//0.0027693048879217*a^(3)+6.5471960667387*a^(2)+8572.0268775523*a+3305136.1067313
 	const float scale = 1000000;
-	const float c1 = 0.005999;
-	const float c2 = 14.7752;
-	const float c3 = 14612.0;
-	const float c4 = 4.90186;
-
+	const float c1 = 0.002769;
+	const float c2 = 6.5472;
+	const float c3 = 8572.03;
+	const float c4 = 3.30514;
 
 	float t1 = c1 * (x * x * x);
 	float t2 = c2 * (x * x);
@@ -357,19 +357,20 @@ float real_position(float pseudoposition)
 }
 
 float leftSpeedValid, rightSpeedValid;
-line_state_t prev_state;
+line_state_t run_state;
+int state_lock = 0;
+
+#define ST_LOCKED(state) (state_lock != 0 && run_state == (state))
 
 // get PID controller output given error and speed, using the PID constants from the LUT
 void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 {
-	//Serial.println(error);
 
-	if (fabs(error) > 3.0)
+	if (fabs(error) > 10.0)
 	{
 		*speed = 0;
-		error = abs(error) / error * 3.0;
+		error = abs(error) / error * 10.0;
 	}
-
 
 	float output = 0;
 	pid_t terms = pid_lerp(*speed);
@@ -395,7 +396,7 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 		*speed = 0;
 
 	// OVERRIDE!
-	// *speed = 3;
+	*speed = 1;
 
 	if (output > 0)
 	{
@@ -410,36 +411,50 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 		*leftSpeed = *leftSpeed < -255 ? -255 : *leftSpeed;
 	}
 
-	if(state != prev_state) 
-	
 	if (state == ST_NOMINAL)
 	{
-		prev_state = ST_NOMINAL;
 		leftSpeedValid = *leftSpeed;
 		rightSpeedValid = *rightSpeed;
+		if (run_state == ST_ALL_BLACK && fabs(error) < 0.5)
+			run_state = ST_NOMINAL;
+		else if (run_state == ST_ALL_BLACK)
+			goto all_blk;
 	}
-	else if (state == ST_ALL_BLACK)
+	else if (state == ST_ALL_BLACK || ST_LOCKED(ST_ALL_BLACK))
+	//else
 	{
-		prev_state = ST_ALL_BLACK;
-		*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 30;
-		*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 30;
+	all_blk:;
+	/*
+		run_state = ST_ALL_BLACK;
+		if (!ST_LOCKED(ST_ALL_BLACK))
+			state_lock = 20;
+		if (state_lock == 1 && fabs(error) > 0.5)
+			state_lock = 8;
+		*leftSpeed = abs(leftSpeedValid) / leftSpeedValid * 30;
+		*rightSpeed = abs(rightSpeedValid) / rightSpeedValid * 30;
 		*speed = 0;
-	}
-	else if (state == ST_ALL_WHITE)
-	{
-		
-		if(prev_state == ST_NOMINAL) {
-			*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 40 - 80;
-			*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 40 - 80;
-		} else {
-			*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 40 - 80;
-			*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 40 - 80;
-		}
-		*speed = 0;
+		*/
 	}
 	
+	else if (state == ST_ALL_WHITE && !ST_LOCKED(ST_ALL_BLACK))
+	{
+		run_state = ST_ALL_WHITE;
+		// 	//if(!ST_LOCKED(ST_ALL_WHITE)) state_lock = 20;
+		// 	//if(state_lock == 1 && fabs(error) > 0.5) state_lock = 8;
+		//*leftSpeed = abs(leftSpeedValid) / leftSpeedValid * 40 - 80;
+		//*rightSpeed = abs(rightSpeedValid) / rightSpeedValid * 40 - 80;
+		*leftSpeed = 0;
+		*rightSpeed = 0;
+		*speed = 0;
+	}
+
 
 	//Serial.println(state_str(state));
+
+	// if (state_lock)
+	// 	state_lock--;
+	// else
+	// 	run_state = ST_NOMINAL;
 
 	previous_pos = error;
 }
@@ -494,6 +509,8 @@ void loop()
 		Motor4->run(BACKWARD);
 	}
 
+	// if(run_state == ST_ALL_BLACK) delay(250);
+	// if(run_state == ST_ALL_WHITE) delay(250);
 	// if (!extreme_position_lock && !all_white_lock && !all_black_lock)
 	// 	bad_state = false;
 
