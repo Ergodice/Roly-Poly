@@ -173,10 +173,10 @@ const pid_t speedLUT[] = {
 		40},
 	(pid_t){
 		// Speed 1 (80)
-		20,
+		50,
 		0.1,
 		90,
-		16,
+		20,
 		80},
 	(pid_t){
 		// Speed 2 (120)
@@ -254,7 +254,7 @@ bool bad_state_prev = false;
 
 line_state_t find_state(int sum)
 {
-	if (sum < 2600)
+	if (sum < 2100)
 		return ST_ALL_WHITE;
 	if (sum < 3000)
 		return ST_NOMINAL;
@@ -345,8 +345,7 @@ float real_position(float pseudoposition)
 {
 	
 	float x = pseudoposition;
-	Serial.println(x);
-	
+
 	const float ys[] = {2,1.5,1,.5,0,-.5,-1,-1.5,-2};
 	const float xs[] = {-100,-44,11,51,71,74,111,187,280};
 
@@ -397,10 +396,13 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed, float 
 	err_acc += error;
 	err_acc = clamp_abs(err_acc, terms.r);
 	float speed_change = 0.02 -abs(0.2 * terms.d * (error - previous_pos)) * 3 / 255;
-	if (speed_change < 0.0) {
-		output *= 3;
-		speed_change *= 3;
+	
+	if (speed_change < 0)
+	{
+		//output *= 5;
 	}
+
+	
 	*speed += speed_change;
 	*speed = min(max(*speed, 0), speed_limit);
 
@@ -472,6 +474,9 @@ void setup()
 }
 
 // standard Arduino loop function
+
+bool all_block_lock = false;
+float black_lock_time = 0.0;
 void loop()
 
 {	
@@ -479,6 +484,8 @@ void loop()
 
 	int duration = time - last_time;
 	last_time = time;
+
+	
 
 	pid_step(real_position(pseudoposition_calc().position), &speed, &leftSpeed, &rightSpeed, curvature);
 	/*
@@ -488,14 +495,45 @@ void loop()
 	}
 	*/
 
+
+
+	if (all_block_lock) {
+		black_lock_time += duration;
+		if (black_lock_time > 200 && state != ST_ALL_BLACK) {
+			all_block_lock = false;
+			black_lock_time = 0.0;
+		}
+	}
+	if (state == ST_ALL_BLACK)
+	{
+		all_block_lock = true;
+		leftSpeed = sign(curvature) * 100 - 50;
+		rightSpeed = -sign(curvature) * 100 - 50;
+		leftSpeed = 0;
+		rightSpeed = 0;
+	}
+	else
+	{	
+		curvature = .95 * curvature + sign(leftSpeed - rightSpeed);
+	}
+
+	if (abs(leftSpeed) < 20)
+	{
+		if (abs(leftSpeed)> 1) {
+			leftSpeed = sign(leftSpeed) * 20;
+		}
+	}
+	if (abs(rightSpeed) < 20)
+	{
+		if (abs(rightSpeed) < 1) {
+			rightSpeed = sign(rightSpeed) * 20;
+		}
+	}
+	
 	Motor2->setSpeed(abs(leftSpeed));
 	Motor2->run(leftSpeed > 0 ? FORWARD : BACKWARD);
 	Motor4->setSpeed(abs(rightSpeed));
 	Motor4->run(rightSpeed > 0 ? FORWARD : BACKWARD);
-
-	curvature = .9 * curvature + sign(leftSpeed - rightSpeed);
-
-	
 	// if (!extreme_position_lock && !all_white_lock && !all_black_lock)
 	// 	bad_state = false;
 
