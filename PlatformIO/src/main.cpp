@@ -129,11 +129,29 @@ typedef struct
 	float spread;
 } pseudoposition_t;
 
+int sign(float x)
+{
+	if (x > 0)
+		return 1;
+	else if (x < 0)
+		return -1;
+	else
+		return 0;
+}
+
+float clamp_abs(float x, float bound) {
+	if (x > bound)
+		return bound;
+	else if (x < -bound)
+		return -bound;
+	else
+		return x;
+}
+
 typedef enum
 {
 	ST_NOMINAL,
 	ST_ALL_WHITE,
-	ST_TWO_LINE,
 	ST_ALL_BLACK
 } line_state_t;
 
@@ -187,7 +205,7 @@ const map_t photomapLUT[] = {
 	(map_t){}};
 
 const int photo_pins_unmapped[] = {A8, A9, A10, A11, A12, A13, A14};
-const int photo_pins[] = {A9, A13, A11, A10, A8, A14, A12};
+const int photo_pins[] = {A13, A11, A9, A12, A14, A8, A10};
 // {0, 0, 1, 2, 3, 4, 5, 6, 7, 7}
 const float photo_LUT[] = {0.58, 0.58, 0.74, 0.73, 0.35, -0.03, -0.11, 0.11, 0.11};
 
@@ -254,8 +272,6 @@ char *state_str(line_state_t state)
 		return "All Black";
 	case ST_ALL_WHITE:
 		return "All White";
-	case ST_TWO_LINE:
-		return "2 lines";
 	default:
 		return "Bruh";
 	}
@@ -265,21 +281,21 @@ char *state_str(line_state_t state)
 pseudoposition_t pseudoposition_calc()
 {
 	float position_raw = 0.0;
-	float weights[7];
 	int sum = 0;
 
 	for (int i = 0; i < 7; i++)
 	{
 		float readout = 1024.0 - ((float)analogRead(photo_pins[i]));
-		//Serial.print(readout);
-		//Serial.print(" \t");
+		// Serial.print(readout);
+		// Serial.print(" \t");
 		float node = (float)(i - 3);
 		float weight = node * readout;
 		position_raw += weight;
-		weights[i] = weight;
 		sum += readout;
 	}
 	//Serial.println();
+
+	//Serial.println(position_raw);
 
 	//Serial.println(sum);
 
@@ -330,6 +346,7 @@ float real_position(float pseudoposition)
 	// y = 1.1193e-8 x^3 + 0.000015x^2 + 0.009167x+2.0907
 	// [0.011193,15.,9167.,2.0907e6]
 	float x = pseudoposition;
+	Serial.println(x);
 
 /*
 	const float scale = 1000000;
@@ -340,11 +357,11 @@ float real_position(float pseudoposition)
 	*/
 
 	//5.9987026497829e−9*a^(3)+1.4775180062956−5*a^(2)+0.014612004640109*a+4.9018603996764
-	const float scale = 1000000;
-	const float c1 = 0.005999;
-	const float c2 = 14.7752;
-	const float c3 = 14612.0;
-	const float c4 = 4.90186;
+	const float scale = 1;
+	const float c1 = -14.78787879;
+	const float c2 = 6.58008658;
+	const float c3 = -37.57575758;
+	const float c4 = 60.25541126;
 
 
 	float t1 = c1 * (x * x * x);
@@ -352,24 +369,28 @@ float real_position(float pseudoposition)
 	float t3 = c3 * (x);
 
 	float poly = t1 + t2 + t3;
-
+	Serial.println(poly + c4);
 	return poly / scale + c4;
 }
 
 float leftSpeedValid, rightSpeedValid;
+float curvature = 0.0;
+int last_time;
+
 line_state_t prev_state;
 
 // get PID controller output given error and speed, using the PID constants from the LUT
-void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
+void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed, float curvature)
 {
 	//Serial.println(error);
-
-	if (fabs(error) > 3.0)
+	
+	float speed_limit = 3.0;
+	float error_limit = 2.5;
+	if (fabs(error) > error_limit)
 	{
 		*speed = 0;
-		error = abs(error) / error * 3.0;
+		error = clamp_abs(error, error_limit);
 	}
-
 
 	float output = 0;
 	pid_t terms = pid_lerp(*speed);
@@ -377,30 +398,21 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 	output += terms.i * err_acc;
 	output += terms.d * (error - previous_pos);
 	err_acc += error;
-
-	if (err_acc > terms.r)
-	{
-		err_acc = terms.r;
+	err_acc = clamp_abs(err_acc, terms.r);
+	float speed_change = 0.02 -abs(0.2 * terms.d * (error - previous_pos)) * 3 / 255;
+	if (speed_change < 0.0) {
+		output *= 3;
+		speed_change *= 3;
 	}
-	else if (err_acc < -terms.r)
-	{
-		err_acc = -terms.r;
-	}
+	*speed += speed_change;
+	*speed = min(max(*speed, 0), speed_limit);
 
-	*speed += 0.02;
-	*speed -= abs(0.2 * terms.d * (error - previous_pos)) * 3.0 / 255.0;
-	if (*speed > 2)
-		*speed = 2;
-	if (*speed < 0)
-		*speed = 0;
-
-	// OVERRIDE!
-	// *speed = 3;
 
 	if (output > 0)
 	{
 		*leftSpeed = terms.s;
 		*rightSpeed = terms.s - (int)output;
+		//.println(output);
 		*rightSpeed = *rightSpeed < -255 ? -255 : *rightSpeed;
 	}
 	else
@@ -410,34 +422,28 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed)
 		*leftSpeed = *leftSpeed < -255 ? -255 : *leftSpeed;
 	}
 
-	if(state != prev_state) 
+	if(state != prev_state) {
 	
-	if (state == ST_NOMINAL)
-	{
-		prev_state = ST_NOMINAL;
-		leftSpeedValid = *leftSpeed;
-		rightSpeedValid = *rightSpeed;
-	}
-	else if (state == ST_ALL_BLACK)
-	{
-		prev_state = ST_ALL_BLACK;
-		*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 30;
-		*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 30;
-		*speed = 0;
-	}
-	else if (state == ST_ALL_WHITE)
-	{
-		
-		if(prev_state == ST_NOMINAL) {
-			*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 40 - 80;
-			*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 40 - 80;
-		} else {
-			*leftSpeed = abs(leftSpeedValid)/leftSpeedValid * 40 - 80;
-			*rightSpeed = abs(rightSpeedValid)/rightSpeedValid * 40 - 80;
+		if (state == ST_NOMINAL)
+		{
+			if (prev_state == ST_ALL_BLACK)
+			{
+				*leftSpeed = 255;
+				*rightSpeed = 255;
+			}
+			leftSpeedValid = *leftSpeed;
+			rightSpeedValid = *rightSpeed;
 		}
-		*speed = 0;
+		else if (state == ST_ALL_BLACK)
+		{
+			
+		}
+		else if (state == ST_ALL_WHITE)
+		{
+			*speed = 0;
+		}
+		prev_state = state;
 	}
-	
 
 	//Serial.println(state_str(state));
 
@@ -470,30 +476,29 @@ void setup()
 
 // standard Arduino loop function
 void loop()
-{
-	pid_step(real_position(pseudoposition_calc().position), &speed, &leftSpeed, &rightSpeed);
-	if (leftSpeed > 0)
-	{
-		Motor2->setSpeed(leftSpeed);
-		Motor2->run(FORWARD);
-	}
-	else
-	{
-		Motor2->setSpeed(-leftSpeed);
-		Motor2->run(BACKWARD);
-	}
 
-	if (rightSpeed > 0)
-	{
-		Motor4->setSpeed(rightSpeed);
-		Motor4->run(FORWARD);
-	}
-	else
-	{
-		Motor4->setSpeed(-rightSpeed);
-		Motor4->run(BACKWARD);
-	}
+{	
+	int time = millis();
 
+	int duration = time - last_time;
+	last_time = time;
+
+	pid_step(real_position(pseudoposition_calc().position), &speed, &leftSpeed, &rightSpeed, curvature);
+	/*
+	if (state == ST_ALL_BLACK) {
+		leftSpeed = sign(curvature);
+		rightSpeed = sign(curvature);
+	}
+	*/
+
+	Motor2->setSpeed(abs(leftSpeed));
+	Motor2->run(leftSpeed > 0 ? FORWARD : BACKWARD);
+	Motor4->setSpeed(abs(rightSpeed));
+	Motor4->run(rightSpeed > 0 ? FORWARD : BACKWARD);
+
+	curvature = .9 * curvature + sign(leftSpeed - rightSpeed);
+
+	
 	// if (!extreme_position_lock && !all_white_lock && !all_black_lock)
 	// 	bad_state = false;
 
@@ -517,10 +522,4 @@ void loop()
 	// 	//	Serial.println("Extreme Position Unlocked.");
 	// }
 
-	// if (bad_state != bad_state_prev)
-	// {
-	// 	//Serial.print("Bad state? ");
-	// 	//Serial.println(bad_state);
-	// }
-	// bad_state_prev = bad_state;
 }
