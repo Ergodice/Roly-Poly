@@ -12,59 +12,44 @@ as we have additional goals for our robot.
 As such, our code works very differently from the
 provided code, but we have tried to document it as
 best we could.
-
 -
-
 Our first goal was to avoid the calibration process
 all together.
-
 The first step was ensuring uniform and consistent
 illumination of the track. This is accomplished
 with a segment of an LED strip that is placed
 next to the photoresistors.
-
 The next step was to get the weighted average of the raw
 photoresistor outputs and place the robot at 13 positions
 from far left to far right.
-
 We record what the raw photoresistor outputs were
 and correspond them with the "actual" position
 of the robot.
-
 This gives us a lookup table that we can use to
 calculate the position of the robot.
-
 We went the extra step of approximating the
 relationship with a regressed cubic polynomial.
 (We found a cubic equation that followed the lookup
 table close enough). This simplified the process.
-
 -
-
 Our second goal was to have absolutely no
 potentiometers on the robot.
-
 This, of course, means that we cannot change the PID
 terms between tracks, so we have to make it adapt
 to each track.
-
 The first step is manually tuning the PID terms at
 various speeds, slow to fast. We then ramp up the
 speed of the robot as long as it is following the
 track well. The PID terms in use are linearly
 interpolated between the values we found previously.
-
 So we have a LUT that looks like this:
 Speed 1 -> PID 1
 Speed 2 -> PID 2
 ...
 Speed N -> PID N
-
 For example, if the current speed is 1.5, then the
 PID terms are half way between PID 1 and PID 2.
-
 How do we know when to slow down?
-
 We want to slow down when the track is quickly escaping
 the center of our robot, indicating we are moving faster
 than we can keep up. A greate measurement of this is
@@ -72,16 +57,13 @@ the change in error. So we decrease the speed
 proportional to the current D term times dE/dt.
 (At the moment we do not care about dt as it is basically
 constant).
-
 The final issue is abrupt turns. The robot often
 runs off the track.
-
 We haven't implemented this yet, but we plan
 to counter this by making another LUT or
 approximation of the relationship between the
 sum of the raw photoresistor outputs and the
 quantity of track visible.
-
 If the robot is following a simple track, our
 "confidence" value should be within the
 appropriate range, if not, (meaning the robot
@@ -89,14 +71,11 @@ is either over a very steep turn, over multiple tracks,
 or over no tracks at all) we continue motion
 at the rate at the previous valid "confidence"
 value.
-
 It is difficult to explain this in text,
 I hope I explained it well, but if there is any
 confusion, please come to use and we can discuss
 in person.
-
 Thank you from the Roly Poly team!
-
 */
 
 // CODE BEGIN
@@ -169,7 +148,7 @@ const pid_t speedLUT[] = {
 		25,
 		0.05,
 		2,
-		8,
+		10,
 		40},
 	(pid_t){
 		// Speed 1 (80)
@@ -183,21 +162,21 @@ const pid_t speedLUT[] = {
 		45,
 		0.075,
 		150,
-		40,
+		30,
 		120},
 	(pid_t){
 		// Speed 3 (250)
-		50,
-		0.1,
-		275,
-		30,
+		80,
+		0.2,
+		1000,
+		80,
 		255},
 	(pid_t){
 		// Speed 3 (250)
-		50,
-		0.1,
-		275,
-		30,
+		80,
+		0.2,
+		1000,
+		80,
 		255}};
 
 // unused
@@ -318,10 +297,8 @@ pseudoposition_t pseudoposition_calc()
   int whole = (int)position_raw + 3;
   float frac = position_raw + 3 - whole;
   float frac_inv = 1.0 - frac;
-
   float position_low = photo_LUT[whole + 1];
   float position_high = photo_LUT[whole + 2];
-
   float position = position_high * frac + position_low * frac;
   
   float summation = 0;
@@ -330,7 +307,6 @@ pseudoposition_t pseudoposition_calc()
 	float diff = weights[i] - position_raw;
 	summation += diff * diff;
   }
-
   float deviation = sqrtf(summation / 7);
   */
 	return (pseudoposition_t){
@@ -376,11 +352,11 @@ int last_time;
 line_state_t prev_state;
 
 // get PID controller output given error and speed, using the PID constants from the LUT
-void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed, float curvature)
+void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed, float elapsed)
 {
 	//Serial.println(error);
 	
-	float speed_limit = 3.0;
+	float speed_limit = 3;
 	float error_limit = 2.5;
 	if (fabs(error) > error_limit)
 	{
@@ -394,24 +370,19 @@ void pid_step(float error, float *speed, int *leftSpeed, int *rightSpeed, float 
 	output += terms.i * err_acc;
 	output += terms.d * (error - previous_pos);
 	err_acc += error;
+	err_acc *= .99;
 	err_acc = clamp_abs(err_acc, terms.r);
-	float speed_change = 0.02 -abs(0.2 * terms.d * (error - previous_pos)) * 3 / 255;
-	
-	if (speed_change < 0)
-	{
-		//output *= 5;
-	}
+	float speed_change = 0.02 -abs(0.01 * terms.d * (error - previous_pos)) * 3 / 255;
 
 	
 	*speed += speed_change;
 	*speed = min(max(*speed, 0), speed_limit);
-
+	// *speed = 2;
 
 	if (output > 0)
 	{
 		*leftSpeed = terms.s;
 		*rightSpeed = terms.s - (int)output;
-		//.println(output);
 		*rightSpeed = *rightSpeed < -255 ? -255 : *rightSpeed;
 	}
 	else
@@ -482,12 +453,12 @@ void loop()
 {	
 	int time = millis();
 
-	int duration = time - last_time;
+	int elapsed = time - last_time;
 	last_time = time;
 
 	
 
-	pid_step(real_position(pseudoposition_calc().position), &speed, &leftSpeed, &rightSpeed, curvature);
+	pid_step(real_position(pseudoposition_calc().position), &speed, &leftSpeed, &rightSpeed, elapsed);
 	/*
 	if (state == ST_ALL_BLACK) {
 		leftSpeed = sign(curvature);
@@ -496,7 +467,7 @@ void loop()
 	*/
 
 
-
+	/*
 	if (all_block_lock) {
 		black_lock_time += duration;
 		if (black_lock_time > 200 && state != ST_ALL_BLACK) {
@@ -529,32 +500,11 @@ void loop()
 			rightSpeed = sign(rightSpeed) * 20;
 		}
 	}
-	
+	*/
 	Motor2->setSpeed(abs(leftSpeed));
 	Motor2->run(leftSpeed > 0 ? FORWARD : BACKWARD);
 	Motor4->setSpeed(abs(rightSpeed));
 	Motor4->run(rightSpeed > 0 ? FORWARD : BACKWARD);
-	// if (!extreme_position_lock && !all_white_lock && !all_black_lock)
-	// 	bad_state = false;
 
-	// if (all_white_lock)
-	// {
-	// 	all_white_lock--;
-	// 	//if (!all_white_lock)
-	// 	//	Serial.println("All White Unlocked.");
-	// }
-
-	// if (all_black_lock)
-	// {
-	// 	all_black_lock--;
-	// 	//if (!all_black_lock)
-	// 	//	Serial.println("All White Unlocked.");
-	// }
-	// if (extreme_position_lock)
-	// {
-	// 	extreme_position_lock--;
-	// 	//if (!extreme_position_lock)
-	// 	//	Serial.println("Extreme Position Unlocked.");
-	// }
 
 }
