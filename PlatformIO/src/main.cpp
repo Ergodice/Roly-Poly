@@ -343,34 +343,31 @@ pseudoposition_t pseudoposition_calc()
 // Eliminates the need for calibration!
 float real_position(float pseudoposition)
 {
-	// y = 1.1193e-8 x^3 + 0.000015x^2 + 0.009167x+2.0907
-	// [0.011193,15.,9167.,2.0907e6]
+	
 	float x = pseudoposition;
 	Serial.println(x);
+	
+	const float ys[] = {2,1.5,1,.5,0,-.5,-1,-1.5,-2};
+	const float xs[] = {-100,-44,11,51,71,74,111,187,280};
 
-/*
-	const float scale = 1000000;
-	const float c1 = 0.011193;
-	const float c2 = 15;
-	const float c3 = 9167;
-	const float c4 = 2.0907;
-	*/
-
-	//5.9987026497829e−9*a^(3)+1.4775180062956−5*a^(2)+0.014612004640109*a+4.9018603996764
-	const float scale = 1;
-	const float c1 = -14.78787879;
-	const float c2 = 6.58008658;
-	const float c3 = -37.57575758;
-	const float c4 = 60.25541126;
-
-
-	float t1 = c1 * (x * x * x);
-	float t2 = c2 * (x * x);
-	float t3 = c3 * (x);
-
-	float poly = t1 + t2 + t3;
-	Serial.println(poly + c4);
-	return poly / scale + c4;
+	int xs_length = sizeof(xs) / sizeof(float);
+	float diffs[xs_length-1] = {}; 
+	for (int i = 0; i < xs_length - 1; i++)
+	{
+		diffs[i] = xs[i + 1] - xs[i];
+	}
+	int region = 0;
+	while (x > xs[region+1])
+	{
+		region++;
+		if (region == xs_length - 2)
+			break;
+	}
+	float y_left = ys[region];
+	float y_right = ys[region + 1];
+	float diff = (x - xs[region])/diffs[region];
+	float y = y_left + diff * (y_right - y_left);
+	return y;
 }
 
 float leftSpeedValid, rightSpeedValid;
