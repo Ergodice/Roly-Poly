@@ -267,7 +267,9 @@ pseudoposition_t pseudoposition_calc()
 	float position_raw = 0.0;
 	float weights[7];
 	int sum = 0;
+	const float min_blacks[] = {400, 170, 400, 290, 380, 330, 310};
 
+	float black_strengths[7] = {};
 	for (int i = 0; i < 7; i++)
 	{
 		float readout = 1024.0 - ((float)analogRead(photo_pins[i]));
@@ -278,11 +280,48 @@ pseudoposition_t pseudoposition_calc()
 		position_raw += weight;
 		weights[i] = weight;
 		sum += readout;
-	}
-	//Serial.println();
+		black_strengths[i] = (readout > min_blacks[i]);
 
-	//Serial.println(sum);
+		Serial.print(black_strengths[i]);
+		Serial.print(" \t");
+	}
+	Serial.println();
+
+	/*
+	float best_strength = 0;
+	int best_strength_position = 0;
+	for (int i = 1; i < 6; i++) {
+		float strength = black_strengths[i-1] + black_strengths[i] + black_strengths[i+1];
+		if (strength > best_strength) {
+			best_strength = strength;
+			best_strength_position = i;
+		}
+	}
+	float right_extent = .5;
+	for (int i = best_strength_position + 1; i < 7; i++) {
+		right_extent += black_strengths[i];
+		if (black_strengths[i] < 0.8) {
+			break;
+		}
+	}
+	float left_extent = .5;
+	for (int i = best_strength_position - 1; i >= 0; i++) {
+		left_extent += black_strengths[i];
+		if (black_strengths[i] < 0.8) {
+			break;
+		}
+	}
+	float left_value = best_strength_position - left_extent;
+	float right_value = best_strength_position + right_extent;
+	*/
+	//Serial.print(left_value);
+	//Serial.print("\t");
+	//Serial.print(right_value);
+
+
 	//Serial.println(position_raw);
+
+	Serial.println();
 
 	state = find_state(sum);
 	if (state != state_prev)
